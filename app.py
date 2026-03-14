@@ -1,56 +1,124 @@
 import streamlit as st
-import os
 import json
+import io
+import zipfile
 from datetime import date, datetime
-from pathlib import Path
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 
-from gmail_scanner import scan_account
+from gmail_scanner import scan_account_with_creds
 from paypal_scanner import parse_paypal_csv, build_receipt_text
 from invoice_parser import parse_invoice
-from file_manager import save_invoice
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
+SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 
-def load_config():
+# ── OAuth helpers ─────────────────────────────────────────────────────────────
+
+def get_client_config():
+    return json.loads(st.secrets["GMAIL_CREDENTIALS"])
+
+
+def get_redirect_uri():
+    return st.secrets["REDIRECT_URI"]
+
+
+def build_flow():
+    return Flow.from_client_config(
+        get_client_config(),
+        scopes=SCOPES,
+        redirect_uri=get_redirect_uri()
+    )
+
+
+def save_credentials(key, creds):
+    st.session_state[f"creds_{key}"] = {
+        "token": creds.token,
+        "refresh_token": creds.refresh_token,
+        "token_uri": creds.token_uri,
+        "client_id": creds.client_id,
+        "client_secret": creds.client_secret,
+        "scopes": list(creds.scopes or SCOPES),
+    }
+
+
+def load_credentials(key):
+    data = st.session_state.get(f"creds_{key}")
+    if not data:
+        return None
+    creds = Credentials(
+        token=data["token"],
+        refresh_token=data["refresh_token"],
+        token_uri=data["token_uri"],
+        client_id=data["client_id"],
+        client_secret=data["client_secret"],
+        scopes=data["scopes"],
+    )
+    if creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            save_credentials(key, creds)
+        except Exception:
+            return None
+    return creds if creds.valid else None
+
+
+# ── Handle OAuth callback ─────────────────────────────────────────────────────
+
+if "code" in st.query_params and "pending_oauth_key" in st.session_state:
+    code = st.query_params["code"]
+    key = st.session_state.pop("pending_oauth_key")
     try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {"gmail1": "", "gmail2": "", "base_folder": str(Path.home() / "Invoices")}
+        flow = build_flow()
+        flow.fetch_token(code=code)
+        save_credentials(key, flow.credentials)
+        st.query_params.clear()
+        st.rerun()
+    except Exception as e:
+        st.error(f"שגיאה בהתחברות ל-Gmail: {e}")
 
 
-def save_config(cfg):
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
+# ── Page setup ────────────────────────────────────────────────────────────────
 
-
-cfg = load_config()
-
-st.set_page_config(page_title="Nira's Invoice Scanner", page_icon="🧾", layout="wide")
+st.set_page_config(page_title="מערכת סריקת חשבוניות", page_icon="🧾", layout="wide")
 st.title("🧾 מערכת סריקת חשבוניות")
 
-# ── Sidebar ──────────────────────────────────────────────────────────────────
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+
 with st.sidebar:
     st.header("⚙️ הגדרות")
 
-    st.subheader("תיקיית שמירה")
-    base_folder = st.text_input("נתיב לתיקייה", value=cfg.get("base_folder", ""))
-
     st.subheader("📧 חשבונות Gmail")
-    gmail1 = st.text_input("Gmail ראשון", value=cfg.get("gmail1", ""))
-    gmail2 = st.text_input("Gmail שני (אופציונלי)", value=cfg.get("gmail2", ""))
+    gmail1 = st.text_input("Gmail ראשון")
+    gmail2 = st.text_input("Gmail שני (אופציונלי)")
 
-    if st.button("💾 שמור הגדרות"):
-        save_config({"gmail1": gmail1, "gmail2": gmail2, "base_folder": base_folder})
-        st.success("נשמר!")
+    for gmail in [g for g in [gmail1, gmail2] if g.strip()]:
+        key = gmail.strip()
+        creds = load_credentials(key)
+        if creds:
+            st.success(f"✅ {key} — מחובר")
+            if st.button(f"🔓 התנתק מ-{key}", key=f"logout_{key}"):
+                st.session_state.pop(f"creds_{key}", None)
+                st.rerun()
+        else:
+            if st.button(f"🔗 התחבר עם Google — {key}", key=f"login_{key}"):
+                st.session_state["pending_oauth_key"] = key
+                flow = build_flow()
+                auth_url, _ = flow.authorization_url(
+                    access_type="offline",
+                    prompt="consent",
+                    login_hint=key,
+                )
+                st.link_button("לחצי כאן להתחבר ל-Google", auth_url)
 
     st.subheader("💳 PayPal")
     paypal_file = st.file_uploader("העלי קובץ CSV מ-PayPal", type=["csv"])
     st.caption("ב-PayPal: Activity → Statements → Download → CSV")
 
-# ── Date range ───────────────────────────────────────────────────────────────
+
+# ── Date range ────────────────────────────────────────────────────────────────
+
 st.subheader("📅 טווח תאריכים")
 col1, col2 = st.columns(2)
 with col1:
@@ -63,6 +131,7 @@ if start_date > end_date:
     st.stop()
 
 # ── Run button ────────────────────────────────────────────────────────────────
+
 run = st.button("🔍 בצע סריקה", type="primary", use_container_width=True)
 st.markdown("""
 <style>
@@ -79,22 +148,14 @@ div.stButton > button[kind="primary"]:hover {
 """, unsafe_allow_html=True)
 
 if run:
-    if not gmail1 and not paypal_file:
-        st.error("יש להזין לפחות חשבון Gmail אחד או קובץ PayPal.")
+    accounts = [(g.strip(), load_credentials(g.strip())) for g in [gmail1, gmail2] if g.strip()]
+    connected = [(email, creds) for email, creds in accounts if creds]
+
+    if not connected and not paypal_file:
+        st.error("יש להתחבר לפחות לחשבון Gmail אחד או להעלות קובץ PayPal.")
         st.stop()
 
-    if not base_folder:
-        st.error("יש לבחור תיקיית שמירה.")
-        st.stop()
-
-    os.makedirs(base_folder, exist_ok=True)
-
-    # Create a unique subfolder for this scan run to avoid duplicates
-    run_timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    scan_folder = os.path.join(base_folder, f"scan_{run_timestamp}")
-    os.makedirs(scan_folder, exist_ok=True)
-
-    saved_files = []
+    saved_files = []   # {name, bytes, month}
     manual_links = []
     errors = []
 
@@ -102,11 +163,8 @@ if run:
     end_dt = datetime.combine(end_date, datetime.max.time())
 
     # ── Gmail ─────────────────────────────────────────────────────────────────
-    accounts = [a for a in [gmail1, gmail2] if a.strip()]
-
-    for account in accounts:
+    for account, creds in connected:
         st.info(f"🔄 סורק {account}...")
-
         progress_bar = st.progress(0, text=f"סורק {account}...")
 
         def update_progress(current, total, acc=account):
@@ -114,10 +172,9 @@ if run:
             progress_bar.progress(pct, text=f"סורק {acc}: {current}/{total}")
 
         try:
-            pdfs, links = scan_account(account, start_dt, end_dt, update_progress)
+            pdfs, links = scan_account_with_creds(creds, account, start_dt, end_dt, update_progress)
             manual_links.extend(links)
-
-            progress_bar.progress(100, text=f"✅ {account} — נמצאו {len(pdfs)} קבצי PDF, {len(links)} קישורים לטיפול ידני")
+            progress_bar.progress(100, text=f"✅ {account} — נמצאו {len(pdfs)} קבצי PDF, {len(links)} קישורים")
 
             for item in pdfs:
                 try:
@@ -128,14 +185,25 @@ if run:
                     if not is_invoice:
                         errors.append(f"{item['subject']}: דולג — לא זוהה כחשבונית")
                         continue
-                    # Use email metadata as fallback if Claude couldn't extract
                     if business == "Unknown":
                         business = item.get("sender_name", "Unknown")
                     if date_str == datetime.today().strftime("%Y-%m-%d"):
                         date_str = item.get("email_date", date_str)
-                    path = save_invoice(item["bytes"], business, date_str, scan_folder, "pdf")
-                    saved_files.append({"קובץ": os.path.basename(path), "עסק": business,
-                                        "תאריך": date_str, "מקור": account})
+
+                    try:
+                        month = datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m")
+                    except Exception:
+                        month = "unknown"
+
+                    safe_business = business.replace("/", "_").replace("\\", "_")
+                    filename = f"{month}/{safe_business}_{date_str}.pdf"
+                    saved_files.append({
+                        "name": filename,
+                        "bytes": item["bytes"],
+                        "עסק": business,
+                        "תאריך": date_str,
+                        "מקור": account,
+                    })
                 except Exception as e:
                     errors.append(f"{item['subject']}: {e}")
 
@@ -149,21 +217,46 @@ if run:
             transactions = parse_paypal_csv(paypal_file, start_dt, end_dt)
             for tx in transactions:
                 receipt_text = build_receipt_text(tx)
-                path = save_invoice(receipt_text, tx["business"], tx["date_str"],
-                                    scan_folder, "txt")
-                saved_files.append({"קובץ": os.path.basename(path), "עסק": tx["business"],
-                                    "תאריך": tx["date_str"], "מקור": "PayPal"})
+                try:
+                    month = datetime.strptime(tx["date_str"], "%Y-%m-%d").strftime("%Y-%m")
+                except Exception:
+                    month = "unknown"
+                safe_business = tx["business"].replace("/", "_").replace("\\", "_")
+                filename = f"{month}/{safe_business}_{tx['date_str']}.txt"
+                saved_files.append({
+                    "name": filename,
+                    "bytes": receipt_text.encode("utf-8"),
+                    "עסק": tx["business"],
+                    "תאריך": tx["date_str"],
+                    "מקור": "PayPal",
+                })
             st.success(f"✅ PayPal — נמצאו {len(transactions)} עסקאות")
         except Exception as e:
             st.error(f"שגיאה בקובץ PayPal: {e}")
 
     # ── Results ───────────────────────────────────────────────────────────────
     st.divider()
-    st.subheader(f"✅ נשמרו {len(saved_files)} חשבוניות")
+    st.subheader(f"✅ נמצאו {len(saved_files)} חשבוניות")
 
     if saved_files:
-        st.dataframe(saved_files, use_container_width=True)
-        st.success(f"הקבצים נשמרו ב: {scan_folder}")
+        table = [{"קובץ": f["name"].split("/")[-1], "עסק": f["עסק"],
+                  "תאריך": f["תאריך"], "מקור": f["מקור"]} for f in saved_files]
+        st.dataframe(table, use_container_width=True)
+
+        # Create ZIP in memory
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for f in saved_files:
+                zf.writestr(f["name"], f["bytes"])
+        zip_buffer.seek(0)
+
+        st.download_button(
+            label="📥 הורד את כל החשבוניות (ZIP)",
+            data=zip_buffer,
+            file_name=f"invoices_{datetime.now().strftime('%Y-%m-%d')}.zip",
+            mime="application/zip",
+            use_container_width=True,
+        )
 
     if manual_links:
         st.divider()
@@ -178,6 +271,6 @@ if run:
             st.markdown(f"📧 **{l['subject']}** | {l['date']} | {l['account']} | {links_str}")
 
     if errors:
-        with st.expander(f"⚠️ {len(errors)} שגיאות"):
+        with st.expander(f"⚠️ {len(errors)} דילוגים"):
             for e in errors:
                 st.text(e)
