@@ -68,6 +68,11 @@ def get_attachment_bytes(service, msg_id, att_id):
 
 SKIP_DOMAINS = ["unsubscribe", "mailto", "tracking", "open.php", "pixel", "click."]
 
+# שולחים/דומיינים שיש לדלג עליהם תמיד (לא חשבוניות)
+SKIP_SENDERS = [
+    "hunted.co.il",
+]
+
 def extract_links(text):
     urls = re.findall(r"https?://[^\s<>\"'{}|\\^`\[\]]+", text)
     return [u for u in urls if not any(s in u.lower() for s in SKIP_DOMAINS)]
@@ -151,6 +156,10 @@ def scan_account(account_email, start_date, end_date, progress_callback=None):
                 date_str = h["value"]
             elif h["name"] == "From":
                 sender = h["value"]
+
+        # דלג על שולחים שאינם חשבוניות
+        if any(skip in sender.lower() for skip in SKIP_SENDERS):
+            continue
 
         # Parse email date for fallback
         email_date = None

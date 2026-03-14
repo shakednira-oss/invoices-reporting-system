@@ -64,6 +64,19 @@ if start_date > end_date:
 
 # ── Run button ────────────────────────────────────────────────────────────────
 run = st.button("🔍 בצע סריקה", type="primary", use_container_width=True)
+st.markdown("""
+<style>
+div.stButton > button[kind="primary"] {
+    background-color: #28a745;
+    border-color: #28a745;
+    color: white;
+}
+div.stButton > button[kind="primary"]:hover {
+    background-color: #218838;
+    border-color: #1e7e34;
+}
+</style>
+""", unsafe_allow_html=True)
 
 if run:
     if not gmail1 and not paypal_file:
@@ -111,7 +124,10 @@ if run:
                     if not item["bytes"]:
                         errors.append(f"{item['subject']}: קובץ PDF ריק, דולג")
                         continue
-                    business, date_str = parse_invoice(pdf_bytes=item["bytes"])
+                    business, date_str, is_invoice = parse_invoice(pdf_bytes=item["bytes"])
+                    if not is_invoice:
+                        errors.append(f"{item['subject']}: דולג — לא זוהה כחשבונית")
+                        continue
                     # Use email metadata as fallback if Claude couldn't extract
                     if business == "Unknown":
                         business = item.get("sender_name", "Unknown")

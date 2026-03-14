@@ -41,10 +41,10 @@ def parse_invoice(pdf_bytes=None, email_text=None):
                 {
                     "role": "user",
                     "content": (
-                        "Extract the following from this invoice or receipt text:\n"
-                        "1. Business or company name (the seller/vendor, not the buyer)\n"
-                        "2. Invoice or receipt date\n\n"
+                        "Analyze this document and determine if it is an invoice, receipt, or payment confirmation.\n"
+                        "Documents like CVs, resumes, job applications, or any non-financial documents are NOT invoices.\n\n"
                         "Return ONLY in this exact format (no extra text):\n"
+                        "IS_INVOICE: [YES or NO]\n"
                         "BUSINESS: [name]\n"
                         "DATE: [YYYY-MM-DD]\n\n"
                         "If you cannot find the business name, write Unknown.\n"
@@ -56,16 +56,19 @@ def parse_invoice(pdf_bytes=None, email_text=None):
         )
 
         result = response.content[0].text
+        is_invoice = True
         business = "Unknown"
         date_str = datetime.today().strftime("%Y-%m-%d")
 
         for line in result.splitlines():
-            if line.startswith("BUSINESS:"):
+            if line.startswith("IS_INVOICE:"):
+                is_invoice = "YES" in line.upper()
+            elif line.startswith("BUSINESS:"):
                 business = line.replace("BUSINESS:", "").strip()
             elif line.startswith("DATE:"):
                 date_str = line.replace("DATE:", "").strip()
 
-        return business, date_str
+        return business, date_str, is_invoice
 
     except Exception:
-        return "Unknown", datetime.today().strftime("%Y-%m-%d")
+        return "Unknown", datetime.today().strftime("%Y-%m-%d"), True
