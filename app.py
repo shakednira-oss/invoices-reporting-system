@@ -10,7 +10,14 @@ from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 
-from gmail_scanner import scan_account_with_creds
+try:
+    from gmail_scanner import scan_account_with_creds
+except Exception as e:
+    import traceback
+    st.error(f"שגיאת ייבוא gmail_scanner: {type(e).__name__}: {e}")
+    st.code(traceback.format_exc())
+    st.stop()
+
 from paypal_scanner import parse_paypal_csv, build_receipt_text
 from invoice_parser import parse_invoice
 
