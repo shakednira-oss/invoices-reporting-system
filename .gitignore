@@ -1,0 +1,17 @@
+# סביבה וירטואלית
+venv/
+
+# קבצי הרשאות רגישים - לעולם לא להעלות!
+credentials/
+*.pickle
+*.json
+!config.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# קבצי מערכת
+.env
+.DS_Store
