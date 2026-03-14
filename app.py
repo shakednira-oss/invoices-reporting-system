@@ -72,7 +72,7 @@ if "code" in st.query_params:
     if key:
         try:
             flow = build_flow()
-            flow.fetch_token(code=code)
+            flow.fetch_token(code=code, code_verifier=None)
             save_credentials(key, flow.credentials)
             st.session_state.pop("pending_oauth_key", None)
             st.query_params.clear()
@@ -119,6 +119,7 @@ with st.sidebar:
                     prompt="consent",
                     login_hint=key,
                     state=key,
+                    code_challenge_method=None,
                 )
                 st.link_button("לחצי כאן להתחבר ל-Google", auth_url)
 
