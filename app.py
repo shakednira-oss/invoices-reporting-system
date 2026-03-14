@@ -2,6 +2,9 @@ import streamlit as st
 import json
 import io
 import zipfile
+import hashlib
+import base64
+import secrets as py_secrets
 from datetime import date, datetime
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
@@ -68,11 +71,18 @@ def load_credentials(key):
 
 if "code" in st.query_params:
     code = st.query_params["code"]
-    key = st.query_params.get("state", st.session_state.get("pending_oauth_key", ""))
+    state_raw = st.query_params.get("state", "{}")
+    try:
+        state_data = json.loads(state_raw)
+        key = state_data.get("key", "")
+        code_verifier = state_data.get("cv", "")
+    except Exception:
+        key = state_raw
+        code_verifier = ""
     if key:
         try:
             flow = build_flow()
-            flow.fetch_token(code=code, code_verifier=None)
+            flow.fetch_token(code=code, code_verifier=code_verifier or None)
             save_credentials(key, flow.credentials)
             st.session_state.pop("pending_oauth_key", None)
             st.query_params.clear()
@@ -114,12 +124,19 @@ with st.sidebar:
             if st.button(f"🔗 התחבר עם Google — {key}", key=f"login_{key}"):
                 st.session_state["pending_oauth_key"] = key
                 flow = build_flow()
+                # יצירת PKCE code verifier ושמירתו ב-state
+                code_verifier = base64.urlsafe_b64encode(py_secrets.token_bytes(32)).rstrip(b'=').decode()
+                code_challenge = base64.urlsafe_b64encode(
+                    hashlib.sha256(code_verifier.encode()).digest()
+                ).rstrip(b'=').decode()
+                state_data = json.dumps({"key": key, "cv": code_verifier})
                 auth_url, _ = flow.authorization_url(
                     access_type="offline",
                     prompt="consent",
                     login_hint=key,
-                    state=key,
-                    code_challenge_method=None,
+                    state=state_data,
+                    code_challenge=code_challenge,
+                    code_challenge_method="S256",
                 )
                 st.link_button("לחצי כאן להתחבר ל-Google", auth_url)
 
