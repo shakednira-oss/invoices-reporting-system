@@ -66,17 +66,19 @@ def load_credentials(key):
 
 # ── Handle OAuth callback ─────────────────────────────────────────────────────
 
-if "code" in st.query_params and "pending_oauth_key" in st.session_state:
+if "code" in st.query_params:
     code = st.query_params["code"]
-    key = st.session_state.pop("pending_oauth_key")
-    try:
-        flow = build_flow()
-        flow.fetch_token(code=code)
-        save_credentials(key, flow.credentials)
-        st.query_params.clear()
-        st.rerun()
-    except Exception as e:
-        st.error(f"שגיאה בהתחברות ל-Gmail: {e}")
+    key = st.query_params.get("state", st.session_state.get("pending_oauth_key", ""))
+    if key:
+        try:
+            flow = build_flow()
+            flow.fetch_token(code=code)
+            save_credentials(key, flow.credentials)
+            st.session_state.pop("pending_oauth_key", None)
+            st.query_params.clear()
+            st.rerun()
+        except Exception as e:
+            st.error(f"שגיאה בהתחברות ל-Gmail: {e}")
 
 
 # ── Page setup ────────────────────────────────────────────────────────────────
@@ -116,6 +118,7 @@ with st.sidebar:
                     access_type="offline",
                     prompt="consent",
                     login_hint=key,
+                    state=key,
                 )
                 st.link_button("לחצי כאן להתחבר ל-Google", auth_url)
 
