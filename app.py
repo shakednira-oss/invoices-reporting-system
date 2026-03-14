@@ -90,6 +90,12 @@ st.caption("פותח על ידי נירה שקד באמצעות Claude Code")
 with st.sidebar:
     st.header("⚙️ הגדרות")
 
+    st.subheader("🔑 מפתח Anthropic API")
+    anthropic_key = st.text_input("הזיני את מפתח ה-API שלך", type="password",
+                                   help="ניתן להשיג בחינם בכתובת console.anthropic.com")
+    if not anthropic_key:
+        st.warning("נדרש מפתח API כדי להפעיל את הסריקה")
+
     st.subheader("📧 חשבונות Gmail")
     gmail1 = st.text_input("Gmail ראשון")
     gmail2 = st.text_input("Gmail שני (אופציונלי)")
@@ -152,6 +158,10 @@ if run:
     accounts = [(g.strip(), load_credentials(g.strip())) for g in [gmail1, gmail2] if g.strip()]
     connected = [(email, creds) for email, creds in accounts if creds]
 
+    if not anthropic_key:
+        st.error("יש להזין מפתח Anthropic API.")
+        st.stop()
+
     if not connected and not paypal_file:
         st.error("יש להתחבר לפחות לחשבון Gmail אחד או להעלות קובץ PayPal.")
         st.stop()
@@ -182,7 +192,7 @@ if run:
                     if not item["bytes"]:
                         errors.append(f"{item['subject']}: קובץ PDF ריק, דולג")
                         continue
-                    business, date_str, is_invoice = parse_invoice(pdf_bytes=item["bytes"])
+                    business, date_str, is_invoice = parse_invoice(pdf_bytes=item["bytes"], api_key=anthropic_key)
                     if not is_invoice:
                         errors.append(f"{item['subject']}: דולג — לא זוהה כחשבונית")
                         continue
