@@ -83,6 +83,7 @@ if "code" in st.query_params and "pending_oauth_key" in st.session_state:
 
 st.set_page_config(page_title="מערכת סריקת חשבוניות", page_icon="🧾", layout="wide")
 st.title("🧾 מערכת סריקת חשבוניות")
+st.caption("פותח על ידי נירה שקד באמצעות Claude Code")
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
