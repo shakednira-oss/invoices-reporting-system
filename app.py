@@ -112,6 +112,7 @@ with st.sidebar:
             if st.button(f"🔗 התחבר עם Google — {key}", key=f"login_{key}"):
                 st.session_state["pending_oauth_key"] = key
                 flow = build_flow()
+                st.caption(f"DEBUG redirect_uri: {get_redirect_uri()}")
                 auth_url, _ = flow.authorization_url(
                     access_type="offline",
                     prompt="consent",
