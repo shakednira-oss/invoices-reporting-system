@@ -34,7 +34,6 @@ def get_oauth_component():
         authorize_endpoint=AUTHORIZE_URL,
         token_endpoint=TOKEN_URL,
         refresh_token_endpoint=TOKEN_URL,
-        revoke_token_endpoint=REVOKE_URL,
     )
 
 def build_gmail_creds(token_data):
