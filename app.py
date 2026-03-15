@@ -2,100 +2,19 @@ import streamlit as st
 import json
 import io
 import zipfile
-import hashlib
-import base64
-import secrets as py_secrets
 from datetime import date, datetime
-from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
+from streamlit_oauth import OAuth2Component
 
-try:
-    from gmail_scanner import scan_account_with_creds
-except Exception as e:
-    import traceback
-    st.error(f"שגיאת ייבוא gmail_scanner: {type(e).__name__}: {e}")
-    st.code(traceback.format_exc())
-    st.stop()
-
+from gmail_scanner import scan_account_with_creds
 from paypal_scanner import parse_paypal_csv, build_receipt_text
 from invoice_parser import parse_invoice
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-
-
-# ── OAuth helpers ─────────────────────────────────────────────────────────────
-
-def get_client_config():
-    return json.loads(st.secrets["GMAIL_CREDENTIALS"])
-
-
-def get_redirect_uri():
-    return st.secrets["REDIRECT_URI"]
-
-
-def build_flow():
-    return Flow.from_client_config(
-        get_client_config(),
-        scopes=SCOPES,
-        redirect_uri=get_redirect_uri()
-    )
-
-
-def save_credentials(key, creds):
-    st.session_state[f"creds_{key}"] = {
-        "token": creds.token,
-        "refresh_token": creds.refresh_token,
-        "token_uri": creds.token_uri,
-        "client_id": creds.client_id,
-        "client_secret": creds.client_secret,
-        "scopes": list(creds.scopes or SCOPES),
-    }
-
-
-def load_credentials(key):
-    data = st.session_state.get(f"creds_{key}")
-    if not data:
-        return None
-    creds = Credentials(
-        token=data["token"],
-        refresh_token=data["refresh_token"],
-        token_uri=data["token_uri"],
-        client_id=data["client_id"],
-        client_secret=data["client_secret"],
-        scopes=data["scopes"],
-    )
-    if creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-            save_credentials(key, creds)
-        except Exception:
-            return None
-    return creds if creds.valid else None
-
-
-# ── Handle OAuth callback ─────────────────────────────────────────────────────
-
-if "code" in st.query_params:
-    code = st.query_params["code"]
-    state_raw = st.query_params.get("state", "{}")
-    try:
-        state_data = json.loads(state_raw)
-        key = state_data.get("key", "")
-        code_verifier = state_data.get("cv", "")
-    except Exception:
-        key = state_raw
-        code_verifier = ""
-    if key:
-        try:
-            flow = build_flow()
-            flow.fetch_token(code=code, code_verifier=code_verifier or None)
-            save_credentials(key, flow.credentials)
-            st.session_state.pop("pending_oauth_key", None)
-            st.query_params.clear()
-            st.rerun()
-        except Exception as e:
-            st.error(f"שגיאה בהתחברות ל-Gmail: {e}")
+SCOPES = "https://www.googleapis.com/auth/gmail.readonly"
+AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/auth"
+TOKEN_URL = "https://accounts.google.com/o/oauth2/token"
+REVOKE_URL = "https://accounts.google.com/o/oauth2/revoke"
 
 
 # ── Page setup ────────────────────────────────────────────────────────────────
@@ -104,6 +23,31 @@ st.set_page_config(page_title="מערכת סריקת חשבוניות", page_ico
 st.title("🧾 מערכת סריקת חשבוניות")
 st.caption("פותח על ידי נירה שקד באמצעות Claude Code")
 
+# ── OAuth helper ──────────────────────────────────────────────────────────────
+
+def get_oauth_component():
+    creds = json.loads(st.secrets["GMAIL_CREDENTIALS"])
+    client = creds["web"]
+    return OAuth2Component(
+        client_id=client["client_id"],
+        client_secret=client["client_secret"],
+        authorize_endpoint=AUTHORIZE_URL,
+        token_endpoint=TOKEN_URL,
+        refresh_token_endpoint=TOKEN_URL,
+        revoke_token_endpoint=REVOKE_URL,
+    )
+
+def build_gmail_creds(token_data):
+    return Credentials(
+        token=token_data.get("access_token"),
+        refresh_token=token_data.get("refresh_token"),
+        token_uri=TOKEN_URL,
+        client_id=json.loads(st.secrets["GMAIL_CREDENTIALS"])["web"]["client_id"],
+        client_secret=json.loads(st.secrets["GMAIL_CREDENTIALS"])["web"]["client_secret"],
+        scopes=[SCOPES],
+    )
+
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
 with st.sidebar:
@@ -111,41 +55,60 @@ with st.sidebar:
 
     st.subheader("🔑 מפתח Anthropic API")
     anthropic_key = st.text_input("הזיני את מפתח ה-API שלך", type="password",
-                                   help="ניתן להשיג בחינם בכתובת console.anthropic.com")
+                                   help="ניתן להשיג בכתובת console.anthropic.com")
     if not anthropic_key:
         st.warning("נדרש מפתח API כדי להפעיל את הסריקה")
 
     st.subheader("📧 חשבונות Gmail")
-    gmail1 = st.text_input("Gmail ראשון")
-    gmail2 = st.text_input("Gmail שני (אופציונלי)")
 
-    for gmail in [g for g in [gmail1, gmail2] if g.strip()]:
-        key = gmail.strip()
-        creds = load_credentials(key)
-        if creds:
-            st.success(f"✅ {key} — מחובר")
-            if st.button(f"🔓 התנתק מ-{key}", key=f"logout_{key}"):
-                st.session_state.pop(f"creds_{key}", None)
+    redirect_uri = st.secrets["REDIRECT_URI"]
+    oauth2 = get_oauth_component()
+
+    # Gmail 1
+    gmail1 = st.text_input("Gmail ראשון")
+    token1 = None
+    if gmail1:
+        if f"token_{gmail1}" in st.session_state:
+            st.success(f"✅ {gmail1} — מחובר")
+            if st.button(f"🔓 התנתק", key="logout1"):
+                del st.session_state[f"token_{gmail1}"]
                 st.rerun()
+            token1 = st.session_state[f"token_{gmail1}"]
         else:
-            if st.button(f"🔗 התחבר עם Google — {key}", key=f"login_{key}"):
-                st.session_state["pending_oauth_key"] = key
-                flow = build_flow()
-                # יצירת PKCE code verifier ושמירתו ב-state
-                code_verifier = base64.urlsafe_b64encode(py_secrets.token_bytes(32)).rstrip(b'=').decode()
-                code_challenge = base64.urlsafe_b64encode(
-                    hashlib.sha256(code_verifier.encode()).digest()
-                ).rstrip(b'=').decode()
-                state_data = json.dumps({"key": key, "cv": code_verifier})
-                auth_url, _ = flow.authorization_url(
-                    access_type="offline",
-                    prompt="consent",
-                    login_hint=key,
-                    state=state_data,
-                    code_challenge=code_challenge,
-                    code_challenge_method="S256",
-                )
-                st.link_button("לחצי כאן להתחבר ל-Google", auth_url)
+            result = oauth2.authorize_button(
+                name=f"🔗 התחבר עם Google",
+                redirect_uri=redirect_uri,
+                scope=SCOPES,
+                key="oauth1",
+                extras_params={"prompt": "consent", "access_type": "offline", "login_hint": gmail1},
+                use_container_width=True,
+            )
+            if result and "token" in result:
+                st.session_state[f"token_{gmail1}"] = result["token"]
+                st.rerun()
+
+    # Gmail 2
+    gmail2 = st.text_input("Gmail שני (אופציונלי)")
+    token2 = None
+    if gmail2:
+        if f"token_{gmail2}" in st.session_state:
+            st.success(f"✅ {gmail2} — מחובר")
+            if st.button(f"🔓 התנתק", key="logout2"):
+                del st.session_state[f"token_{gmail2}"]
+                st.rerun()
+            token2 = st.session_state[f"token_{gmail2}"]
+        else:
+            result = oauth2.authorize_button(
+                name=f"🔗 התחבר עם Google",
+                redirect_uri=redirect_uri,
+                scope=SCOPES,
+                key="oauth2",
+                extras_params={"prompt": "consent", "access_type": "offline", "login_hint": gmail2},
+                use_container_width=True,
+            )
+            if result and "token" in result:
+                st.session_state[f"token_{gmail2}"] = result["token"]
+                st.rerun()
 
     st.subheader("💳 PayPal")
     paypal_file = st.file_uploader("העלי קובץ CSV מ-PayPal", type=["csv"])
@@ -183,18 +146,21 @@ div.stButton > button[kind="primary"]:hover {
 """, unsafe_allow_html=True)
 
 if run:
-    accounts = [(g.strip(), load_credentials(g.strip())) for g in [gmail1, gmail2] if g.strip()]
-    connected = [(email, creds) for email, creds in accounts if creds]
-
     if not anthropic_key:
         st.error("יש להזין מפתח Anthropic API.")
         st.stop()
 
-    if not connected and not paypal_file:
+    accounts = []
+    if token1:
+        accounts.append((gmail1, build_gmail_creds(token1)))
+    if token2:
+        accounts.append((gmail2, build_gmail_creds(token2)))
+
+    if not accounts and not paypal_file:
         st.error("יש להתחבר לפחות לחשבון Gmail אחד או להעלות קובץ PayPal.")
         st.stop()
 
-    saved_files = []   # {name, bytes, month}
+    saved_files = []
     manual_links = []
     errors = []
 
@@ -202,7 +168,7 @@ if run:
     end_dt = datetime.combine(end_date, datetime.max.time())
 
     # ── Gmail ─────────────────────────────────────────────────────────────────
-    for account, creds in connected:
+    for account, creds in accounts:
         st.info(f"🔄 סורק {account}...")
         progress_bar = st.progress(0, text=f"סורק {account}...")
 
@@ -282,7 +248,6 @@ if run:
                   "תאריך": f["תאריך"], "מקור": f["מקור"]} for f in saved_files]
         st.dataframe(table, use_container_width=True)
 
-        # Create ZIP in memory
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
             for f in saved_files:
@@ -303,10 +268,10 @@ if run:
         st.caption("אלה מיילים ללא קובץ מצורף — לחצי על הקישור כדי לפתוח את המייל ב-Gmail:")
         for l in manual_links:
             direct = l.get("url", l.get("gmail_url", ""))
-            gmail = l.get("gmail_url", direct)
+            gmail_url = l.get("gmail_url", direct)
             links_str = f"[פתח חשבונית]({direct})"
-            if gmail != direct:
-                links_str += f" | [פתח מייל ב-Gmail]({gmail})"
+            if gmail_url != direct:
+                links_str += f" | [פתח מייל ב-Gmail]({gmail_url})"
             st.markdown(f"📧 **{l['subject']}** | {l['date']} | {l['account']} | {links_str}")
 
     if errors:
