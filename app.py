@@ -85,7 +85,7 @@ with st.sidebar:
     oauth2 = get_oauth_component()
 
     # Gmail 1
-    gmail1 = st.text_input("Gmail ראשון")
+    gmail1 = st.text_input("Gmail ראשון", key="gmail1_input")
     token1 = None
     if gmail1:
         if f"token_{gmail1}" in st.session_state:
@@ -109,7 +109,7 @@ with st.sidebar:
                 st.rerun()
 
     # Gmail 2
-    gmail2 = st.text_input("Gmail שני (אופציונלי)")
+    gmail2 = st.text_input("Gmail שני (אופציונלי)", key="gmail2_input")
     token2 = None
     if gmail2:
         if f"token_{gmail2}" in st.session_state:
