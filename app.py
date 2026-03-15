@@ -59,6 +59,7 @@ with st.sidebar:
         st.warning("נדרש מפתח API כדי להפעיל את הסריקה")
 
     st.subheader("📧 חשבונות Gmail")
+    st.caption(f"DEBUG redirect_uri: {redirect_uri}")
 
     redirect_uri = st.secrets["REDIRECT_URI"]
     oauth2 = get_oauth_component()
