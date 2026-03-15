@@ -5,6 +5,8 @@ import zipfile
 from datetime import date, datetime
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
+from google.oauth2 import service_account
+from googleapiclient.discovery import build as gsheets_build
 from streamlit_oauth import OAuth2Component
 
 from gmail_scanner import scan_account_with_creds
@@ -12,6 +14,25 @@ from paypal_scanner import parse_paypal_csv, build_receipt_text
 from invoice_parser import parse_invoice
 
 SCOPES = "https://www.googleapis.com/auth/gmail.readonly"
+SHEET_ID = "1qRW8jKq0QkG5mZF1c_rpUrt7WgkC9TOHjuAYTYlOEDA"
+
+
+def log_user(email):
+    try:
+        creds_info = json.loads(st.secrets["SHEETS_CREDENTIALS"])
+        creds = service_account.Credentials.from_service_account_info(
+            creds_info,
+            scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        )
+        service = gsheets_build("sheets", "v4", credentials=creds)
+        service.spreadsheets().values().append(
+            spreadsheetId=SHEET_ID,
+            range="Sheet1!A:A",
+            valueInputOption="RAW",
+            body={"values": [[email]]}
+        ).execute()
+    except Exception:
+        pass
 AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/auth"
 TOKEN_URL = "https://accounts.google.com/o/oauth2/token"
 REVOKE_URL = "https://accounts.google.com/o/oauth2/revoke"
@@ -84,6 +105,7 @@ with st.sidebar:
             )
             if result and "token" in result:
                 st.session_state[f"token_{gmail1}"] = result["token"]
+                log_user(gmail1)
                 st.rerun()
 
     # Gmail 2
@@ -107,6 +129,7 @@ with st.sidebar:
             )
             if result and "token" in result:
                 st.session_state[f"token_{gmail2}"] = result["token"]
+                log_user(gmail2)
                 st.rerun()
 
     st.subheader("💳 PayPal")
