@@ -58,10 +58,10 @@ with st.sidebar:
     if not anthropic_key:
         st.warning("נדרש מפתח API כדי להפעיל את הסריקה")
 
+    redirect_uri = st.secrets["REDIRECT_URI"]
+
     st.subheader("📧 חשבונות Gmail")
     st.caption(f"DEBUG redirect_uri: {redirect_uri}")
-
-    redirect_uri = st.secrets["REDIRECT_URI"]
     oauth2 = get_oauth_component()
 
     # Gmail 1
