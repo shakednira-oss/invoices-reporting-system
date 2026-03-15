@@ -175,8 +175,10 @@ if run:
     accounts = []
     if token1:
         accounts.append((gmail1, build_gmail_creds(token1)))
+        log_user(gmail1)
     if token2:
         accounts.append((gmail2, build_gmail_creds(token2)))
+        log_user(gmail2)
 
     if not accounts and not paypal_file:
         st.error("יש להתחבר לפחות לחשבון Gmail אחד או להעלות קובץ PayPal.")
