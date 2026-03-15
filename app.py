@@ -61,7 +61,6 @@ with st.sidebar:
     redirect_uri = st.secrets["REDIRECT_URI"]
 
     st.subheader("📧 חשבונות Gmail")
-    st.caption(f"DEBUG redirect_uri: {redirect_uri}")
     oauth2 = get_oauth_component()
 
     # Gmail 1
