@@ -15,3 +15,6 @@ __pycache__/
 # קבצי מערכת
 .env
 .DS_Store
+
+# Streamlit secrets - לעולם לא להעלות!
+.streamlit/secrets.toml

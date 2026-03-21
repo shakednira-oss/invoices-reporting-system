@@ -7,7 +7,15 @@ from datetime import datetime
 
 load_dotenv()
 
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+_client = None
+
+def get_client(api_key=None):
+    global _client
+    if api_key:
+        return anthropic.Anthropic(api_key=api_key)
+    if _client is None:
+        _client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    return _client
 
 
 def extract_text_from_pdf(pdf_bytes):
@@ -21,7 +29,7 @@ def extract_text_from_pdf(pdf_bytes):
         return ""
 
 
-def parse_invoice(pdf_bytes=None, email_text=None):
+def parse_invoice(pdf_bytes=None, email_text=None, api_key=None):
     """Extract business name and date from invoice. Returns (business_name, date_str)."""
     if pdf_bytes:
         text = extract_text_from_pdf(pdf_bytes)
@@ -34,7 +42,7 @@ def parse_invoice(pdf_bytes=None, email_text=None):
         return "Unknown", datetime.today().strftime("%Y-%m-%d")
 
     try:
-        response = client.messages.create(
+        response = get_client(api_key).messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=200,
             messages=[

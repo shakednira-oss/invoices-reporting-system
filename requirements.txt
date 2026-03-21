@@ -7,3 +7,4 @@ pdfplumber
 requests
 python-dotenv
 pandas
+streamlit-oauth

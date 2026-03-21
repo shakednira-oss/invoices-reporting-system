@@ -115,14 +115,29 @@ def collect_parts(parts, service, msg_id):
     return attachments, body_text
 
 
+def scan_account_with_creds(credentials, account_email, start_date, end_date, progress_callback=None):
+    """
+    Scan one Gmail account using provided credentials object (for cloud/web use).
+    Returns:
+        pdf_list: list of dicts {bytes, filename, subject, date, account}
+        link_list: list of dicts {subject, date, url, account}
+    """
+    service = build("gmail", "v1", credentials=credentials)
+    return _scan(service, account_email, start_date, end_date, progress_callback)
+
+
 def scan_account(account_email, start_date, end_date, progress_callback=None):
     """
-    Scan one Gmail account.
+    Scan one Gmail account using local file-based authentication (for local use).
     Returns:
         pdf_list: list of dicts {bytes, filename, subject, date, account}
         link_list: list of dicts {subject, date, url, account}
     """
     service = authenticate(account_email)
+    return _scan(service, account_email, start_date, end_date, progress_callback)
+
+
+def _scan(service, account_email, start_date, end_date, progress_callback=None):
     query = build_query(start_date, end_date)
 
     result = service.users().messages().list(
